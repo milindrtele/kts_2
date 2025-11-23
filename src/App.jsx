@@ -2,76 +2,69 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
 
-export default function StereoVideoVR() {
-  const containerRef = useRef(null);
+import { HomeScene } from "./scenes/HomeScene";
+import { VideoScene } from "./scenes/VideoScene";
 
-  // Persistent refs for Three.js objects
-  const rendererRef = useRef(null);
-  const cameraRef = useRef(null);
-  const homeSceneRef = useRef(null);
-  const videoSceneRef = useRef(null);
-  const videoSphereRef = useRef(null);
-  const videoTextureRef = useRef(null);
+export default function applyStereoUV() {
+  const containerRef = useRef();
+  const rendererRef = useRef();
+  const cameraRef = useRef();
+
+  const activeScene = useRef("home");
+
+  const homeSceneRef = useRef();
+  const videoSceneRef = useRef();
+
+  const [stereoMode, setStereoMode] = useState("mono");
+  const [is180, setIs180] = useState(false);
+
   const videoRef = useRef(null);
-  const activeSceneRef = useRef("home");
-  // store geometry refs
-  const leftGeoRef = useRef(null);
-  const rightGeoRef = useRef(null);
 
-  // State
-  const [stereoMode, setStereoMode] = useState("mono"); // mono | side-by-side | over-under
-  const [is180, setIs180] = useState(false); // 180° video flag
-
-  // -----------------------------
-  // DYNAMIC UV MAPPING FUNCTION
-  // -----------------------------
-  function applyStereoUV(geometry, mode, eye, is180 = false) {
+  // Stereo UV method from your code
+  function applyStereoUV(geometry, mode, eye, is180) {
     const uv = geometry.attributes.uv;
-    const uvs = uv.array;
-    const original = geometry.userData.originalUV; // <– use the stored clean UVs
+    const arr = uv.array;
+    const original = geometry.userData.originalUV;
 
-    for (let i = 0; i < uvs.length; i += 2) {
+    for (let i = 0; i < arr.length; i += 2) {
       let u = original[i];
       let v = original[i + 1];
 
-      // 180° field-of-view reduction
       if (is180) {
-        u *= 2.0;
+        u *= 2;
         if (u > 1) u = 1;
       }
 
-      // Stereo modes
       if (mode === "SBS") {
         u *= 0.5;
         if (eye === "RIGHT") u += 0.5;
-      } else if (mode === "TB") {
+      }
+      if (mode === "TB") {
         v *= 0.5;
         if (eye === "RIGHT") v += 0.5;
       }
 
-      uvs[i] = u;
-      uvs[i + 1] = v;
+      arr[i] = u;
+      arr[i + 1] = v;
     }
 
     uv.needsUpdate = true;
   }
 
-  // ============================================================
-  // 2️⃣ SETUP SCENES — RUNS ONLY ONCE
-  // ============================================================
-  const setupScene = () => {
+  // -------------------------------
+  // SETUP — RUNS ONCE
+  // -------------------------------
+  useEffect(() => {
     const container = containerRef.current;
 
-    // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.xr.enabled = true;
+    renderer.setSize(window.innerWidth, window.innerHeight);
     container.appendChild(renderer.domElement);
     document.body.appendChild(VRButton.createButton(renderer));
+
     rendererRef.current = renderer;
 
-    // Camera
     const camera = new THREE.PerspectiveCamera(
       70,
       window.innerWidth / window.innerHeight,
@@ -80,104 +73,105 @@ export default function StereoVideoVR() {
     );
     cameraRef.current = camera;
 
-    // ------------------------
-    // HOME SCENE
-    // ------------------------
-    const homeScene = new THREE.Scene();
-    homeScene.background = new THREE.Color(0x222222);
-
-    const box = new THREE.Mesh(
-      new THREE.BoxGeometry(1, 1, 1),
-      new THREE.MeshBasicMaterial({ color: "white" })
+    // Create both scenes
+    homeSceneRef.current = new HomeScene(renderer, camera);
+    videoSceneRef.current = new VideoScene(
+      renderer,
+      camera,
+      videoRef.current,
+      applyStereoUV,
+      stereoMode,
+      is180
     );
-    box.position.z = -3;
-    homeScene.add(box);
 
-    homeSceneRef.current = homeScene;
+    // Helper to move the real XR controllers/grips into the provided scene
+    function moveControllersToScene(targetScene) {
+      const objs = [
+        renderer.xr.getController(0),
+        renderer.xr.getController(1),
+        renderer.xr.getControllerGrip(0),
+        renderer.xr.getControllerGrip(1),
+      ];
+      objs.forEach((o) => {
+        if (!o) return;
+        if (o.parent) o.parent.remove(o);
+        targetScene.add(o);
+      });
+    }
 
-    // ------------------------
-    // VIDEO SCENE
-    // ------------------------
+    // Ensure controllers start in the home scene
+    moveControllersToScene(homeSceneRef.current.scene);
 
-    // VIDEO TEXTURE
-    videoRef.current.play();
-    const texture = new THREE.VideoTexture(videoRef.current);
-    texture.colorSpace = THREE.SRGBColorSpace;
+    // Add controller click handler (scene switch)
+    function onSelectStart() {
+      const hovered = this.userData?.currentHovered;
+      if (!hovered) return;
 
-    // SCENE
-    const videoScene = new THREE.Scene();
-    videoScene.background = new THREE.Color(0x101010);
-
-    // LEFT SPHERE
-    leftGeoRef.current = new THREE.SphereGeometry(500, 60, 40);
-    leftGeoRef.current.scale(-1, 1, 1);
-    // Store original unclamped UVs
-    leftGeoRef.current.userData.originalUV =
-      leftGeoRef.current.attributes.uv.array.slice();
-
-    applyStereoUV(leftGeoRef.current, stereoMode, "LEFT", is180);
-
-    const mesh1 = new THREE.Mesh(
-      leftGeoRef.current,
-      new THREE.MeshBasicMaterial({ map: texture })
-    );
-    mesh1.rotation.y = -Math.PI / 2;
-    mesh1.layers.set(1);
-    videoScene.add(mesh1);
-
-    // RIGHT SPHERE
-    rightGeoRef.current = new THREE.SphereGeometry(500, 60, 40);
-    rightGeoRef.current.scale(-1, 1, 1);
-    // Store original unclamped UVs
-    rightGeoRef.current.userData.originalUV =
-      rightGeoRef.current.attributes.uv.array.slice();
-
-    applyStereoUV(rightGeoRef.current, stereoMode, "RIGHT", is180);
-
-    const mesh2 = new THREE.Mesh(
-      rightGeoRef.current,
-      new THREE.MeshBasicMaterial({ map: texture })
-    );
-    mesh2.rotation.y = -Math.PI / 2;
-    mesh2.layers.set(2);
-    videoScene.add(mesh2);
-
-    // --------------------------------
-    // XR RENDER LOOP (does NOT rerun setup)
-    // --------------------------------
-    rendererRef.current.setAnimationLoop(() => {
-      if (activeSceneRef.current === "home") {
-        rendererRef.current.render(homeScene, camera);
-      } else {
-        rendererRef.current.render(videoScene, camera);
+      if (hovered.name === "homeBox") {
+        activeScene.current = "video";
+        // Move the real XR controllers into the video scene so rays/grips are visible there
+        moveControllersToScene(videoSceneRef.current.scene);
       }
-    });
-  };
+    }
 
-  // ============================================================
-  // 3️⃣ RUN SETUP ONCE
-  // ============================================================
-  useEffect(() => {
-    setupScene();
+    homeSceneRef.current.controller1.addEventListener(
+      "selectstart",
+      onSelectStart
+    );
+    homeSceneRef.current.controller2.addEventListener(
+      "selectstart",
+      onSelectStart
+    );
+
+    // Render loop
+    renderer.setAnimationLoop(() => {
+      const scene =
+        activeScene.current === "home"
+          ? homeSceneRef.current.scene
+          : videoSceneRef.current.scene;
+
+      renderer.render(scene, camera);
+    });
   }, []);
 
-  // ============================================================
-  // 4️⃣ APPLY STEREO EFFECT WHEN SETTINGS CHANGE
-  // ============================================================
+  // -------------------------------
+  // UPDATE STEREO UV WHEN CHANGED
+  // -------------------------------
   useEffect(() => {
-    applyStereoUV(leftGeoRef.current, stereoMode, "LEFT", is180);
-    applyStereoUV(rightGeoRef.current, stereoMode, "RIGHT", is180);
+    if (!videoSceneRef.current) return;
+
+    applyStereoUV(videoSceneRef.current.leftGeo, stereoMode, "LEFT", is180);
+    applyStereoUV(videoSceneRef.current.rightGeo, stereoMode, "RIGHT", is180);
   }, [stereoMode, is180]);
 
-  // ============================================================
-  // 5️⃣ KEYBOARD HANDLER FOR SCENE SWITCHING
-  // ============================================================
+  // -------------------------------
+  // KEYBOARD INPUT
+  // -------------------------------
   useEffect(() => {
     const onKey = (e) => {
       if (e.code === "Space") {
         console.log("asd");
-        activeSceneRef.current =
-          activeSceneRef.current == "home" ? "video" : "home";
+        activeScene.current =
+          activeScene.current == "home" ? "video" : "home";
+        // also move the controllers to match the active scene
+        const target =
+          activeScene.current == "home"
+            ? homeSceneRef.current?.scene
+            : videoSceneRef.current?.scene;
+        const renderer = rendererRef.current;
+        if (renderer && target) {
+          const objs = [
+            renderer.xr.getController(0),
+            renderer.xr.getController(1),
+            renderer.xr.getControllerGrip(0),
+            renderer.xr.getControllerGrip(1),
+          ];
+          objs.forEach((o) => {
+            if (!o) return;
+            if (o.parent) o.parent.remove(o);
+            target.add(o);
+          });
+        }
       }
       if (e.code === "Numpad1") setStereoMode("mono");
       if (e.code === "Numpad2") setStereoMode("SBS");
@@ -191,18 +185,8 @@ export default function StereoVideoVR() {
 
   return (
     <>
-      <div
-        ref={containerRef}
-        style={{ width: "100vw", height: "100vh", overflow: "hidden" }}
-      />
-      <video
-        ref={videoRef}
-        loop
-        muted
-        crossOrigin="anonymous"
-        playsInline
-        style={{ display: "none" }}
-      >
+      <div ref={containerRef} style={{ width: "100vw", height: "100vh" }} />
+      <video ref={videoRef} loop muted playsInline style={{ display: "none" }}>
         <source src="/videos/MaryOculus.webm" />
         <source src="/videos/MaryOculus.mp4" />
       </video>
