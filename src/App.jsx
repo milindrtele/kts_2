@@ -57,13 +57,13 @@ export default function applyStereoUV() {
   useEffect(() => {
     const container = containerRef.current;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.xr.enabled = true;
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    container.appendChild(renderer.domElement);
-    document.body.appendChild(VRButton.createButton(renderer));
+    rendererRef.current = new THREE.WebGLRenderer({ antialias: true });
+    rendererRef.current.xr.enabled = true;
+    rendererRef.current.setSize(window.innerWidth, window.innerHeight);
+    container.appendChild(rendererRef.current.domElement);
+    document.body.appendChild(VRButton.createButton(rendererRef.current));
 
-    rendererRef.current = renderer;
+    // rendererRef.current = renderer;
 
     const camera = new THREE.PerspectiveCamera(
       70,
@@ -73,10 +73,9 @@ export default function applyStereoUV() {
     );
     cameraRef.current = camera;
 
-    // Create both scenes
-    homeSceneRef.current = new HomeScene(renderer, camera);
+    // Create both scenes (HomeScene constructed below with callback)
     videoSceneRef.current = new VideoScene(
-      renderer,
+      rendererRef.current,
       camera,
       videoRef.current,
       applyStereoUV,
@@ -84,53 +83,22 @@ export default function applyStereoUV() {
       is180
     );
 
-    // Helper to move the real XR controllers/grips into the provided scene
-    function moveControllersToScene(targetScene) {
-      const objs = [
-        renderer.xr.getController(0),
-        renderer.xr.getController(1),
-        renderer.xr.getControllerGrip(0),
-        renderer.xr.getControllerGrip(1),
-      ];
-      objs.forEach((o) => {
-        if (!o) return;
-        if (o.parent) o.parent.remove(o);
-        targetScene.add(o);
-      });
-    }
+    // Create HomeScene with callback and ensure controllers start in the home scene
+    homeSceneRef.current = new HomeScene(rendererRef.current, camera, () => {
+      activeScene.current = "video";
+      moveControllersToScene(videoSceneRef.current.scene);
+    });
 
-    // Ensure controllers start in the home scene
     moveControllersToScene(homeSceneRef.current.scene);
 
-    // Add controller click handler (scene switch)
-    function onSelectStart() {
-      const hovered = this.userData?.currentHovered;
-      if (!hovered) return;
-
-      if (hovered.name === "homeBox") {
-        activeScene.current = "video";
-        // Move the real XR controllers into the video scene so rays/grips are visible there
-        moveControllersToScene(videoSceneRef.current.scene);
-      }
-    }
-
-    homeSceneRef.current.controller1.addEventListener(
-      "selectstart",
-      onSelectStart
-    );
-    homeSceneRef.current.controller2.addEventListener(
-      "selectstart",
-      onSelectStart
-    );
-
     // Render loop
-    renderer.setAnimationLoop(() => {
+    rendererRef.current.setAnimationLoop(() => {
       const scene =
         activeScene.current === "home"
           ? homeSceneRef.current.scene
           : videoSceneRef.current.scene;
 
-      renderer.render(scene, camera);
+      rendererRef.current.render(scene, camera);
     });
   }, []);
 
@@ -147,31 +115,17 @@ export default function applyStereoUV() {
   // -------------------------------
   // KEYBOARD INPUT
   // -------------------------------
+
   useEffect(() => {
     const onKey = (e) => {
       if (e.code === "Space") {
-        console.log("asd");
-        activeScene.current =
-          activeScene.current == "home" ? "video" : "home";
+        activeScene.current = activeScene.current == "home" ? "video" : "home";
         // also move the controllers to match the active scene
         const target =
           activeScene.current == "home"
             ? homeSceneRef.current?.scene
             : videoSceneRef.current?.scene;
-        const renderer = rendererRef.current;
-        if (renderer && target) {
-          const objs = [
-            renderer.xr.getController(0),
-            renderer.xr.getController(1),
-            renderer.xr.getControllerGrip(0),
-            renderer.xr.getControllerGrip(1),
-          ];
-          objs.forEach((o) => {
-            if (!o) return;
-            if (o.parent) o.parent.remove(o);
-            target.add(o);
-          });
-        }
+        if (target) moveControllersToScene(target);
       }
       if (e.code === "Numpad1") setStereoMode("mono");
       if (e.code === "Numpad2") setStereoMode("SBS");
@@ -182,6 +136,54 @@ export default function applyStereoUV() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // Helper to move the real XR controllers/grips into the provided scene
+  function moveControllersToScene(targetScene) {
+    const objs = [
+      rendererRef.current.xr.getController(0),
+      rendererRef.current.xr.getController(1),
+      rendererRef.current.xr.getControllerGrip(0),
+      rendererRef.current.xr.getControllerGrip(1),
+    ];
+    objs.forEach((o) => {
+      if (!o) return;
+      if (o.parent) o.parent.remove(o);
+      targetScene.add(o);
+    });
+
+    // Disable event handlers on all scenes, then enable on the target scene
+    [homeSceneRef.current, videoSceneRef.current].forEach((s) => {
+      if (s && typeof s.disableControllerEvents === "function") {
+        s.disableControllerEvents();
+      }
+    });
+
+    if (
+      homeSceneRef.current &&
+      homeSceneRef.current.scene === targetScene &&
+      typeof homeSceneRef.current.enableControllerEvents === "function"
+    ) {
+      homeSceneRef.current.enableControllerEvents();
+    }
+
+    if (
+      videoSceneRef.current &&
+      videoSceneRef.current.scene === targetScene &&
+      typeof videoSceneRef.current.enableControllerEvents === "function"
+    ) {
+      videoSceneRef.current.enableControllerEvents();
+    }
+  }
+
+  const changeScene = (sceneName) => {
+    activeScene.current = activeScene.current == "home" ? "video" : "home";
+    // also move the controllers to match the active scene
+    const target =
+      activeScene.current == "home"
+        ? homeSceneRef.current?.scene
+        : videoSceneRef.current?.scene;
+    if (target) moveControllersToScene(target);
+  };
 
   return (
     <>
