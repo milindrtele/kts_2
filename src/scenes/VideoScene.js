@@ -2,6 +2,7 @@
 import * as THREE from "three";
 import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
 import { InteractiveGroup } from "three/addons/interactive/InteractiveGroup.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 export class VideoScene {
   // optional onSelect callback: function(selectedObject) { ... }
@@ -85,6 +86,18 @@ export class VideoScene {
 
     this.controller1.add(new THREE.Line(rayGeom));
     this.controller2.add(new THREE.Line(rayGeom));
+
+            // UI from blender
+    
+        const loader = new GLTFLoader();
+        loader.load("/models/video_controls.glb", (gltf) => {
+          const uiPanel = gltf.scene;
+    
+          uiPanel.traverse((child) => {});
+    
+          // uiPanel.position.set(0, 1.5, -2);
+          this.controller2.add(uiPanel);
+        });
 
     this.scene.add(this.controller1);
     this.scene.add(this.controller2);

@@ -2,6 +2,10 @@
 import * as THREE from "three";
 import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
 import { InteractiveGroup } from "three/addons/interactive/InteractiveGroup.js";
+import { GUI } from "three/addons/libs/lil-gui.module.min.js";
+import { HTMLMesh } from "three/addons/interactive/HTMLMesh.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { HDRLoader } from "three/addons/loaders/HDRLoader.js";
 
 export class HomeScene {
   // accept an optional onSelectHome callback that's called when the home box is selected
@@ -11,7 +15,14 @@ export class HomeScene {
     this.onSelectHome = onSelectHome;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x222222);
+    new HDRLoader()
+      .setPath("/hdri")
+      .load("/farmland_overcast_1k.hdr", (texture) => {
+        texture.mapping = THREE.EquirectangularReflectionMapping;
+
+        this.scene.background = texture;
+        this.scene.environment = texture;
+      });
 
     this.raycaster = new THREE.Raycaster();
 
@@ -33,11 +44,16 @@ export class HomeScene {
     this.scene.add(light);
   }
 
+  _onChange() {
+    console.log("Changed");
+  }
+
   _createObjects() {
     this.box = new THREE.Mesh(
       new THREE.BoxGeometry(1, 1, 1),
       new THREE.MeshBasicMaterial({ color: "white" })
     );
+    this.box.position.y = 1;
     this.box.position.z = -3;
     this.box.name = "homeBox";
     this.box.userData.interactive = true;
@@ -45,6 +61,50 @@ export class HomeScene {
     this.interactiveGroup.add(this.box);
 
     this.scene.add(this.interactiveGroup);
+
+    const parameters = {
+      radius: 0.6,
+      tube: 0.2,
+      tubularSegments: 150,
+      radialSegments: 20,
+      p: 2,
+      q: 3,
+      thickness: 0.5,
+    };
+
+    this.gui = new GUI({ width: 300 });
+    this.gui.add(parameters, "radius", 0.0, 1.0).onChange(this._onChange);
+    this.gui.add(parameters, "tube", 0.0, 1.0).onChange(this._onChange);
+    this.gui
+      .add(parameters, "tubularSegments", 10, 150, 1)
+      .onChange(this._onChange);
+    this.gui
+      .add(parameters, "radialSegments", 2, 20, 1)
+      .onChange(this._onChange);
+    this.gui.add(parameters, "p", 1, 10, 1).onChange(this._onChange);
+    this.gui.add(parameters, "q", 0, 10, 1).onChange(this._onChange);
+    this.gui.domElement.style.visibility = "hidden";
+
+    //
+
+    this.UImesh = new HTMLMesh(this.gui.domElement);
+    this.UImesh.position.x = -0.75;
+    this.UImesh.position.y = 1.5;
+    this.UImesh.position.z = -0.5;
+    this.UImesh.rotation.y = Math.PI / 4;
+    this.UImesh.scale.setScalar(2);
+
+    // UI from blender
+
+    const loader = new GLTFLoader();
+    loader.load("/models/home_ui.glb", (gltf) => {
+      const uiPanel = gltf.scene;
+
+      uiPanel.traverse((child) => {});
+
+      uiPanel.position.set(0, 1.5, -2);
+      this.scene.add(uiPanel);
+    });
   }
 
   _setupControllers() {
@@ -81,9 +141,12 @@ export class HomeScene {
         const intersection = intersections[0];
 
         const object = intersection.object;
-       if (object.name === "homeBox" && typeof this.onSelectHome === "function") {
-         this.onSelectHome();
-       }
+        if (
+          object.name === "homeBox" &&
+          typeof this.onSelectHome === "function"
+        ) {
+          this.onSelectHome();
+        }
 
         controller.userData.selected = object;
       }
@@ -113,7 +176,10 @@ export class HomeScene {
 
     console.log(this.interactiveGroup);
 
-    return this.raycaster.intersectObjects(this.interactiveGroup.children, false);
+    return this.raycaster.intersectObjects(
+      this.interactiveGroup.children,
+      false
+    );
   }
 
   enableControllerEvents() {
@@ -138,5 +204,6 @@ export class HomeScene {
 
     // this.interactionGroup.add(this.box);
     this.scene.add(this.interactionGroup);
+    this.interactionGroup.add(this.UImesh);
   }
 }
